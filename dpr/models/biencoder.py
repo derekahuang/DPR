@@ -24,6 +24,8 @@ from dpr.data.biencoder_data import BiEncoderSample
 from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import CheckpointState
 
+from torchsort import soft_rank
+
 logger = logging.getLogger(__name__)
 
 BiEncoderBatch = collections.namedtuple(
@@ -68,12 +70,19 @@ class BiEncoder(nn.Module):
         ctx_model: nn.Module,
         fix_q_encoder: bool = False,
         fix_ctx_encoder: bool = False,
+        m=128,
+        d=768,
+        k=16, 
+        reg=.00001
     ):
         super(BiEncoder, self).__init__()
         self.question_model = question_model
         self.ctx_model = ctx_model
+        self.anchors = nn.Parameter(torch.randn(m, d), requires_grad=True)
         self.fix_q_encoder = fix_q_encoder
         self.fix_ctx_encoder = fix_ctx_encoder
+        self.reg = reg
+        self.k = k
 
     @staticmethod
     def get_representation(
@@ -107,7 +116,7 @@ class BiEncoder(nn.Module):
                     attn_mask,
                     representation_token_pos=representation_token_pos,
                 )
-
+        # Only modify the pooled_output as that is all that is used 
         return sequence_output, pooled_output, hidden_states
 
     def forward(
@@ -136,6 +145,16 @@ class BiEncoder(nn.Module):
             ctx_encoder, context_ids, ctx_segments, ctx_attn_mask, self.fix_ctx_encoder
         )
 
+        distances = (torch.linalg.norm(q_pooled_out, dim=-1)**2).unsqueeze(1) - 2*q_pooled_out @ self.anchors.t() + \
+            (torch.linalg.norm(self.anchors, dim=-1)**2).unsqueeze(0)
+        rank_vecs = soft_rank(distances, regularization_strength=self.reg)
+        q_pooled_out = torch.clamp(rank_vecs, max=self.k+1)
+
+        distances = (torch.linalg.norm(ctx_pooled_out, dim=-1)**2).unsqueeze(1) - 2*ctx_pooled_out @ self.anchors.t() + \
+            (torch.linalg.norm(self.anchors, dim=-1)**2).unsqueeze(0)
+        rank_vecs = soft_rank(distances, regularization_strength=self.reg)
+        ctx_pooled_out = torch.clamp(rank_vecs, max=self.k+1)
+        
         return q_pooled_out, ctx_pooled_out
 
     # TODO delete once moved to the new method
