@@ -1,3 +1,11 @@
+python3 train_dense_encoder.py \
+train_datasets=[nq_train] \
+dev_datasets=[nq_dev] \
+train=biencoder_local \
+output_dir='/home/groups/boahen/huangda_dpr_checkpoints'
+
+
+
 # Dense Passage Retrieval
 
 Dense Passage Retrieval (`DPR`) - is a set of tools and models for state-of-the-art open-domain Q&A research.
